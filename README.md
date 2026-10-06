@@ -1,35 +1,42 @@
 # Laboratório de Linux e Grafana
 
-Projeto de estudos para instalar o Grafana em uma máquina virtual Ubuntu e aprender, na prática, como administrar um serviço Linux e acessá-lo pela rede.
+Projeto de estudos em Linux e observabilidade, iniciado em uma VM local no VirtualBox e expandido para uma VM Ubuntu na Azure. O laboratório reúne Grafana, Prometheus e Node Exporter para acompanhar as métricas da própria máquina.
 
 Trabalho com monitoramento no NOC e estou construindo minha base em Linux, redes e observabilidade. A proposta é entender cada etapa, praticar os comandos e documentar os resultados.
 
 ## Estado atual
 
-**Grafana instalado e página web acessível pelo navegador do Windows.**
+**VM na Azure com métricas coletadas pelo Prometheus e visualizadas no Grafana.**
 
-- [x] Acessar a VM por SSH.
-- [x] Consultar a versão do Ubuntu e o espaço em disco.
-- [x] Preparar a chave pública e cadastrar o repositório oficial do Grafana.
-- [x] Instalar o Grafana pelo APT.
-- [x] Iniciar o serviço e acessar sua interface web.
+- [x] Instalar e acessar o Grafana na VM local.
+- [x] Criar uma VM Ubuntu na Azure e acessar por SSH com chave `.pem`.
+- [x] Atualizar o sistema e instalar o Grafana pelo APT.
+- [x] Habilitar Grafana e Node Exporter no boot.
+- [x] Instalar Node Exporter e Prometheus.
+- [x] Validar a coleta com `up{job="node"} = 1`.
+- [x] Conectar o Grafana ao Prometheus.
+- [x] Criar painéis de CPU, memória, disco e tempo ligado.
+- [x] Consultar os logs do Grafana com `journalctl`.
 
-As duas confirmações acima ainda não foram registradas neste README. A coleta de CPU, memória e disco ainda não está implementada.
+Também praticamos a configuração de um gráfico de histórico de CPU e memória. Loki, Alloy, banco de dados, alertas e teste de carga ficaram para possíveis etapas futuras.
+
+O passo a passo com comandos e explicações está no [manual do laboratório](docs/manual-grafana-azure.md).
 
 ## Ambiente
 
-| Componente | Utilização |
-| --- | --- |
-| VirtualBox | Virtualização local |
-| Ubuntu 22.04.5 LTS (Jammy) | Sistema operacional da VM |
-| Terminal do Windows e SSH | Administração remota da VM |
-| APT | Instalação do Grafana a partir do repositório oficial |
-| systemd / systemctl | Gerenciamento do serviço grafana-server |
-| Grafana OSS | Interface de visualização |
+| Componente | Primeira fase: local | Fase atual: Azure |
+| --- | --- | --- |
+| Infraestrutura | VirtualBox | VM na Azure, grupo de recursos `linux-estudos` |
+| Sistema operacional | Ubuntu 22.04.5 LTS | Ubuntu 24.04 LTS (Noble) |
+| Acesso administrativo | SSH pelo Windows | SSH pelo Windows com chave privada `.pem` |
+| Visualização | Grafana OSS | Grafana OSS |
+| Coleta | Ainda não implementada nessa fase | Prometheus e Node Exporter |
+| Acesso web | IP da VM local, porta 3000 | Túnel SSH e `http://localhost:3000` |
+| Instalação | APT | APT |
 
-O Grafana foi instalado diretamente no Ubuntu, via APT. Esta etapa não utiliza container.
+Os serviços foram instalados diretamente no Ubuntu. Não utilizamos containers nesta etapa. Região e tamanho da VM não estão registrados aqui; sua disponibilidade depende da assinatura e deve ser conferida no portal.
 
-## Etapas realizadas
+## Primeira fase: Grafana na VM local
 
 1. Identifiquei o IP da VM com `ip address` e conectei pelo Windows usando SSH.
 2. Consultei o disco com `df -h` e a distribuição com `lsb_release -a`.
@@ -41,21 +48,109 @@ O Grafana foi instalado diretamente no Ubuntu, via APT. Esta etapa não utiliza 
 
 Referência de instalação: [documentação oficial para Debian e Ubuntu](https://grafana.com/docs/grafana/latest/setup-grafana/installation/debian/).
 
-## Acesso ao laboratório
+## Evolução para Azure
 
-Substitua `IP_DA_VM` pelo endereço atual da sua VM:
+1. Criei a VM e conectei pelo PowerShell usando a chave SSH.
+2. Atualizei o Ubuntu e configurei a chave e o repositório oficial do Grafana.
+3. Instalei o Grafana e habilitei o serviço `grafana-server`.
+4. Testei a resposta local com `curl -I http://localhost:3000`, que retornou um redirecionamento HTTP 302.
+5. Abri um túnel SSH no Windows e acessei a interface pelo navegador.
+6. Instalei o Node Exporter e testei `http://localhost:9100/metrics`.
+7. Instalei o Prometheus e conferi `/etc/prometheus/prometheus.yml`; o pacote já trouxe o job `node` configurado.
+8. Validei pela API que os jobs `prometheus` e `node` estavam com `up = 1`.
+9. Cadastrei `http://localhost:9090` como fonte Prometheus no Grafana; o teste retornou **Successfully queried the Prometheus API.**
+10. Montei os indicadores da VM e acompanhei os registros de consultas do Grafana pelo terminal.
+
+## Acesso ao laboratório na Azure
+
+No **PowerShell do Windows**, substitua o caminho da chave e o IP:
+
+```powershell
+ssh -i "C:\caminho\chave-ubuntu-estudos.pem" -L 3000:localhost:3000 daniel@IP_PUBLICO_DA_VM
+```
+
+Mantenha a sessão aberta e acesse [http://localhost:3000](http://localhost:3000) no navegador. O túnel encaminha a porta 3000 do Windows para a porta 3000 da VM pela conexão SSH. Não é necessário abrir a porta 3000 publicamente para esse acesso.
+
+A chave está no Windows: esse comando não deve ser executado dentro da VM usando um caminho `C:\...`. A chave `.pem`, a senha do Linux e a senha do Grafana têm funções diferentes. Use o IP atual, sem o sufixo de rede `/24`.
+
+## Coleta e visualização
+
+| Componente | Função | Porta |
+| --- | --- | --- |
+| Node Exporter | Expõe métricas do Linux em `/metrics` | 9100 |
+| Prometheus | Busca as métricas e armazena o histórico | 9090 |
+| Grafana | Consulta o Prometheus e apresenta os painéis | 3000 |
+
+Os três serviços estão na mesma VM. O Prometheus consulta o Node Exporter; o Grafana consulta o Prometheus.
+
+Configuração dos jobs presentes no laboratório:
+
+```yaml
+scrape_configs:
+  - job_name: prometheus
+    scrape_interval: 5s
+    scrape_timeout: 5s
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: node
+    static_configs:
+      - targets: ['localhost:9100']
+```
+
+O job `node` herda o intervalo global de 15 segundos. Esse trecho fica dentro do arquivo completo, não substitui toda a configuração. Não foi necessário editar nem duplicar o job.
+
+Para verificar a coleta, execute na VM:
 
 ```bash
-ssh daniel@IP_DA_VM
+curl -sG --data-urlencode 'query=up{job="node"}' http://localhost:9090/api/v1/query
 ```
 
-No navegador do computador:
+O valor `1` confirma sucesso na última coleta do alvo; `0` indica falha na coleta.
 
-```text
-http://IP_DA_VM:3000
+## Painéis e consultas PromQL
+
+Todos usam a fonte Prometheus e o filtro `job="node"`.
+
+### Memória em uso (%)
+
+```promql
+100 * (1 - node_memory_MemAvailable_bytes{job="node"} / node_memory_MemTotal_bytes{job="node"})
 ```
 
-O endereço IP pode mudar. Não inclua o sufixo de rede, como `/24`, no comando SSH ou na URL.
+Estima o percentual em uso a partir da memória disponível que o Linux informa. Visualização **Gauge**, unidade **Percent (0–100)**, limites 0 e 100.
+
+### CPU em uso (%)
+
+```promql
+100 * (1 - avg by (instance) (
+  rate(node_cpu_seconds_total{job="node", mode="idle"}[5m])
+))
+```
+
+Calcula o percentual não ocioso médio dos núcleos, com janela de cinco minutos; inclui modos como espera por I/O. Visualização **Gauge**, unidade **Percent (0–100)**, limites 0 e 100.
+
+### Disco em uso — raiz (%)
+
+```promql
+100 * (1 -
+  node_filesystem_avail_bytes{job="node", mountpoint="/"}
+  /
+  node_filesystem_size_bytes{job="node", mountpoint="/"}
+)
+```
+
+Mostra o percentual não disponível a usuários comuns no sistema de arquivos raiz, incluindo espaço reservado. Visualização **Gauge**, unidade **Percent (0–100)**, limites 0 e 100.
+
+### Tempo ligado da VM
+
+```promql
+node_time_seconds{job="node"} - node_boot_time_seconds{job="node"}
+```
+
+Tempo desde o último boot, em segundos. Visualização **Stat**, unidade **Duration (s)**.
+
+Nos indicadores, usar **Last (not null)** para apresentar o valor mais recente. Para comparar CPU e memória ao longo do tempo, usar as duas consultas em um painel **Time series**, tipo **Range**, com legendas `CPU` e `Memória`. O período sugerido é **Last 15 minutes**, com atualização de **15s**.
 
 ## Comandos de consulta e administração
 
@@ -85,15 +180,35 @@ Comandos de referência para o laboratório; a presença nesta lista não signif
 - **Redirecionamento e privilégios:** usei `echo` com `sudo tee` para gravar a configuração em um diretório do sistema.
 - **Serviço e boot:** iniciar um serviço com `start` e habilitá-lo com `enable` são ações diferentes.
 
-## Próxima etapa: métricas da própria VM
+## Logs e próximos estudos
 
-| Ferramenta | Papel planejado |
-| --- | --- |
-| Node Exporter | Expor métricas do Linux, como CPU, memória e disco |
-| Prometheus | Coletar periodicamente as métricas e armazenar seu histórico |
-| Grafana | Consultar o Prometheus como fonte de dados e apresentar os gráficos |
+Consultamos os registros do serviço na VM:
 
-O primeiro objetivo desta etapa será exibir métricas reais da VM e entender como os dados chegam ao painel. O histórico começará a ser formado depois que a coleta estiver funcionando.
+```bash
+sudo journalctl -u grafana-server -n 30 --no-pager
+sudo journalctl -u grafana-server -f
+```
+
+O primeiro mostra as últimas trinta linhas; o segundo acompanha novos registros. Ctrl+C encerra o acompanhamento sem parar o Grafana.
+
+Vimos consultas do plugin Prometheus com `endpoint=queryData`, `status=ok` e sua duração. São logs de operações do Grafana, não consultas SQL. Os logs continuam sendo consultados pelo terminal; não configuramos sua coleta no dashboard.
+
+Possíveis próximos exercícios, ainda não realizados:
+
+- Teste curto de carga e observação do efeito nas métricas.
+- Coleta e visualização de logs com Alloy e Loki.
+- Monitoramento de um banco de dados de laboratório.
+- Configuração de alertas.
+
+## Aprendizados da etapa Azure
+
+- Executar comandos no computador certo: a chave privada estava no Windows, não na VM.
+- Usar `sudo` nas operações administrativas do serviço.
+- Distinguir pacote, serviço, chave do repositório e chave SSH.
+- Validar cada camada: serviço ativo, endpoint respondendo, coleta com `up = 1` e conexão da fonte no Grafana.
+- Entender que `localhost` depende de quem faz a conexão: Windows no navegador, VM na fonte de dados do Grafana.
+- Diferenciar métricas numéricas de logs de eventos.
+- Diferenciar frequência de coleta, atualização do dashboard e janela de cálculo da consulta.
 
 ## Método de estudo
 
@@ -103,7 +218,7 @@ Durante a prática, tento explicar ou montar o comando antes de consultar a resp
 
 ## Evidências
 
-Ainda serão adicionadas capturas da interface do Grafana, do status do serviço e do primeiro painel com métricas. Antes de publicar imagens, revisar para não incluir senhas, tokens ou dados do trabalho.
+O funcionamento dos serviços, da coleta e dos quatro indicadores foi validado durante a prática. As capturas do dashboard e dos testes ainda não foram adicionadas ao repositório. Antes de publicar imagens, revisar para não incluir senhas, tokens ou dados do trabalho.
 
 ## Autor
 
